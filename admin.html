@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Admin Dashboard — Boiler Log</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --blue: #185FA5; --blue-light: #E6F1FB; --blue-dark: #0C447C;
+    --green: #0F6E56; --green-light: #E1F5EE;
+    --amber: #BA7517; --amber-light: #FAEEDA;
+    --red: #A32D2D; --red-light: #FCEBEB;
+    --gray-50: #F8F8F7; --gray-100: #EFEFED; --gray-300: #C8C7C2;
+    --gray-500: #888780; --gray-700: #4A4A47; --gray-900: #1A1A18;
+    --radius: 12px; --radius-sm: 8px;
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--gray-50); color: var(--gray-900); }
+  header { background: #fff; border-bottom: 1px solid var(--gray-100); padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+  .header-left { display: flex; align-items: center; gap: 12px; }
+  .logo { width: 32px; height: 32px; background: var(--blue); border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+  .logo svg { width: 18px; height: 18px; stroke: #fff; fill: none; stroke-width: 2; }
+  header h1 { font-size: 16px; font-weight: 600; }
+  header p { font-size: 12px; color: var(--gray-500); }
+  .header-actions { display: flex; gap: 8px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 20px 48px; }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .stat { background: #fff; border: 1px solid var(--gray-100); border-radius: var(--radius); padding: 16px; }
+  .stat-label { font-size: 12px; color: var(--gray-500); font-weight: 500; margin-bottom: 6px; }
+  .stat-value { font-size: 26px; font-weight: 700; }
+  .stat-value.ok { color: var(--green); }
+  .stat-value.warn { color: var(--amber); }
+  .stat-value.crit { color: var(--red); }
+  .filters { background: #fff; border: 1px solid var(--gray-100); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+  .filter-field { display: flex; flex-direction: column; gap: 4px; }
+  .filter-field label { font-size: 12px; color: var(--gray-500); font-weight: 500; }
+  .filter-field input, .filter-field select { font-size: 13px; padding: 8px 10px; border: 1px solid var(--gray-300); border-radius: var(--radius-sm); background: #fff; color: var(--gray-900); min-width: 140px; }
+  .filter-field input:focus, .filter-field select:focus { outline: none; border-color: var(--blue); }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all 0.15s; text-decoration: none; }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { background: var(--blue); color: #fff; }
+  .btn-primary:hover { background: var(--blue-dark); }
+  .btn-green { background: var(--green); color: #fff; }
+  .btn-green:hover { background: #085041; }
+  .btn-outline { background: #fff; color: var(--gray-700); border: 1px solid var(--gray-300); }
+  .btn-outline:hover { background: var(--gray-50); }
+  .card { background: #fff; border: 1px solid var(--gray-100); border-radius: var(--radius); overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th { text-align: left; font-size: 11px; font-weight: 600; color: var(--gray-500); padding: 10px 14px; border-bottom: 1px solid var(--gray-100); text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+  tbody td { padding: 11px 14px; border-bottom: 1px solid var(--gray-100); color: var(--gray-900); }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: var(--gray-50); }
+  .badge { display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px; }
+  .badge.normal { background: var(--green-light); color: var(--green); }
+  .badge.warning { background: var(--amber-light); color: var(--amber); }
+  .badge.critical { background: var(--red-light); color: var(--red); }
+  .empty { text-align: center; padding: 48px; color: var(--gray-500); font-size: 14px; }
+  .loading { text-align: center; padding: 48px; color: var(--gray-500); font-size: 14px; }
+  .spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid var(--gray-300); border-top-color: var(--blue); border-radius: 50%; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .conf-pill { font-size: 11px; color: var(--gray-500); }
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
+  .section-title { font-size: 15px; font-weight: 600; }
+  .section-sub { font-size: 13px; color: var(--gray-500); margin-top: 2px; }
+  @media (max-width: 600px) {
+    .hide-mobile { display: none; }
+    main { padding: 16px 12px 40px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <div class="logo">
+      <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+    </div>
+    <div>
+      <h1>Admin Dashboard</h1>
+      <p>Boiler Operations Log — Tyre Pyrolysis Plant</p>
+    </div>
+  </div>
+  <div class="header-actions">
+    <button class="btn btn-green" onclick="exportExcel()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Export Excel
+    </button>
+    <a href="/" class="btn btn-outline">Worker view</a>
+  </div>
+</header>
+
+<main>
+  <div class="stat-grid" id="stats">
+    <div class="stat"><div class="stat-label">Total readings</div><div class="stat-value" id="s-total">—</div></div>
+    <div class="stat"><div class="stat-label">Today</div><div class="stat-value" id="s-today">—</div></div>
+    <div class="stat"><div class="stat-label">Avg temperature</div><div class="stat-value" id="s-temp">—</div></div>
+    <div class="stat"><div class="stat-label">Avg pressure</div><div class="stat-value" id="s-pres">—</div></div>
+    <div class="stat"><div class="stat-label">Warnings</div><div class="stat-value warn" id="s-warn">—</div></div>
+    <div class="stat"><div class="stat-label">Critical</div><div class="stat-value crit" id="s-crit">—</div></div>
+  </div>
+
+  <div class="filters">
+    <div class="filter-field">
+      <label>From date</label>
+      <input type="date" id="filter-from" onchange="applyFilters()" />
+    </div>
+    <div class="filter-field">
+      <label>To date</label>
+      <input type="date" id="filter-to" onchange="applyFilters()" />
+    </div>
+    <div class="filter-field">
+      <label>Boiler unit</label>
+      <select id="filter-unit" onchange="applyFilters()">
+        <option value="">All units</option>
+        <option>Boiler 1</option>
+        <option>Boiler 2</option>
+        <option>Boiler 3</option>
+      </select>
+    </div>
+    <div class="filter-field">
+      <label>Status</label>
+      <select id="filter-status" onchange="applyFilters()">
+        <option value="">All</option>
+        <option value="normal">Normal</option>
+        <option value="warning">Warning</option>
+        <option value="critical">Critical</option>
+      </select>
+    </div>
+    <div class="filter-field">
+      <label>Shift</label>
+      <select id="filter-shift" onchange="applyFilters()">
+        <option value="">All shifts</option>
+        <option>Morning (6am–2pm)</option>
+        <option>Afternoon (2pm–10pm)</option>
+        <option>Night (10pm–6am)</option>
+      </select>
+    </div>
+    <button class="btn btn-outline" onclick="clearFilters()">Clear</button>
+    <button class="btn btn-primary" onclick="loadData()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+      Refresh
+    </button>
+  </div>
+
+  <div class="card">
+    <div style="padding:16px 20px; border-bottom:1px solid var(--gray-100);">
+      <div class="section-header" style="margin-bottom:0;">
+        <div>
+          <div class="section-title">All readings</div>
+          <div class="section-sub" id="table-sub">Loading...</div>
+        </div>
+      </div>
+    </div>
+    <div id="table-wrap">
+      <div class="loading"><div class="spinner"></div></div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ─── CONFIG — same values as index.html ───────────────────────────────────────
+const SUPABASE_URL  = 'YOUR_SUPABASE_URL';
+const SUPABASE_ANON = 'YOUR_SUPABASE_ANON_KEY';
+// ──────────────────────────────────────────────────────────────────────────────
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+let allData = [];
+let filtered = [];
+
+(function setDefaults(){
+  const n=new Date();
+  const todayStr=n.toISOString().split('T')[0];
+  const monthAgo=new Date(n); monthAgo.setDate(monthAgo.getDate()-30);
+  document.getElementById('filter-from').value=monthAgo.toISOString().split('T')[0];
+  document.getElementById('filter-to').value=todayStr;
+})();
+
+async function loadData(){
+  document.getElementById('table-wrap').innerHTML='<div class="loading"><div class="spinner"></div></div>';
+  const { data, error }=await sb.from('gauge_readings').select('*').order('created_at',{ascending:false}).limit(1000);
+  if(error){ document.getElementById('table-wrap').innerHTML=`<div class="empty">Error loading data: ${error.message}</div>`; return; }
+  allData=data||[];
+  applyFilters();
+  updateStats(allData);
+}
+
+function applyFilters(){
+  const from=document.getElementById('filter-from').value;
+  const to=document.getElementById('filter-to').value;
+  const unit=document.getElementById('filter-unit').value;
+  const status=document.getElementById('filter-status').value;
+  const shift=document.getElementById('filter-shift').value;
+
+  filtered=allData.filter(r=>{
+    if(from && r.reading_date < from) return false;
+    if(to && r.reading_date > to) return false;
+    if(unit && r.boiler_unit !== unit) return false;
+    if(status && r.status !== status) return false;
+    if(shift && r.shift !== shift) return false;
+    return true;
+  });
+  renderTable(filtered);
+}
+
+function clearFilters(){
+  document.getElementById('filter-unit').value='';
+  document.getElementById('filter-status').value='';
+  document.getElementById('filter-shift').value='';
+  applyFilters();
+}
+
+function updateStats(data){
+  document.getElementById('s-total').textContent=data.length;
+  const today=new Date().toISOString().split('T')[0];
+  document.getElementById('s-today').textContent=data.filter(r=>r.reading_date===today).length;
+  const temps=data.filter(r=>r.temperature_c!=null).map(r=>r.temperature_c);
+  const press=data.filter(r=>r.pressure_bar!=null).map(r=>r.pressure_bar);
+  document.getElementById('s-temp').textContent=temps.length?(temps.reduce((a,b)=>a+b,0)/temps.length).toFixed(1)+'°C':'—';
+  document.getElementById('s-pres').textContent=press.length?(press.reduce((a,b)=>a+b,0)/press.length).toFixed(2)+' bar':'—';
+  document.getElementById('s-warn').textContent=data.filter(r=>r.status==='warning').length;
+  document.getElementById('s-crit').textContent=data.filter(r=>r.status==='critical').length;
+}
+
+function renderTable(rows){
+  document.getElementById('table-sub').textContent=`${rows.length} reading${rows.length!==1?'s':''} found`;
+  if(!rows.length){
+    document.getElementById('table-wrap').innerHTML='<div class="empty">No readings match your filters.</div>';
+    return;
+  }
+  const html=`<div style="overflow-x:auto;"><table>
+    <thead><tr>
+      <th>Date</th><th>Time</th><th>Operator</th><th>Unit</th><th>Shift</th>
+      <th>Temp (°C)</th><th>Pressure (bar)</th><th>Status</th>
+      <th class="hide-mobile">AI conf.</th><th class="hide-mobile">Notes</th>
+    </tr></thead>
+    <tbody>${rows.map(r=>`<tr>
+      <td>${r.reading_date||'—'}</td>
+      <td>${r.reading_time||'—'}</td>
+      <td style="font-weight:500">${r.operator||'—'}</td>
+      <td>${r.boiler_unit||'—'}</td>
+      <td style="color:var(--gray-500)">${r.shift||'—'}</td>
+      <td style="font-weight:600">${r.temperature_c!=null?r.temperature_c.toFixed(1):'—'}</td>
+      <td style="font-weight:600">${r.pressure_bar!=null?r.pressure_bar.toFixed(2):'—'}</td>
+      <td><span class="badge ${r.status||'normal'}">${r.status||'normal'}</span></td>
+      <td class="hide-mobile"><span class="conf-pill">${r.ai_confidence||0}%</span></td>
+      <td class="hide-mobile" style="color:var(--gray-500);font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.notes||'—'}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+  document.getElementById('table-wrap').innerHTML=html;
+}
+
+function exportExcel(){
+  if(!filtered.length){ alert('No data to export.'); return; }
+  const rows=filtered.map(r=>({
+    'Date': r.reading_date, 'Time': r.reading_time,
+    'Operator': r.operator, 'Unit': r.boiler_unit, 'Shift': r.shift,
+    'Temperature (°C)': r.temperature_c, 'Pressure (bar)': r.pressure_bar,
+    'Status': r.status, 'AI Confidence (%)': r.ai_confidence,
+    'Image Quality': r.image_quality, 'Notes': r.notes,
+    'Submitted At': r.created_at
+  }));
+  const ws=XLSX.utils.json_to_sheet(rows);
+  ws['!cols']=[10,8,14,10,20,15,14,10,16,12,24,22].map(w=>({wch:w}));
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Gauge Readings');
+  XLSX.writeFile(wb,`boiler_log_${new Date().toISOString().split('T')[0]}.xlsx`);
+}
+
+loadData();
+setInterval(loadData, 60000);
+</script>
+</body>
+</html>

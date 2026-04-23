@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Boiler Log — Gauge Reader</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --blue: #185FA5; --blue-light: #E6F1FB; --blue-dark: #0C447C;
+    --green: #0F6E56; --green-light: #E1F5EE;
+    --amber: #BA7517; --amber-light: #FAEEDA;
+    --red: #A32D2D; --red-light: #FCEBEB;
+    --gray-50: #F8F8F7; --gray-100: #EFEFED; --gray-300: #C8C7C2;
+    --gray-500: #888780; --gray-700: #4A4A47; --gray-900: #1A1A18;
+    --radius: 12px; --radius-sm: 8px;
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--gray-50); color: var(--gray-900); min-height: 100vh; }
+  header { background: #fff; border-bottom: 1px solid var(--gray-100); padding: 14px 20px; display: flex; align-items: center; gap: 12px; }
+  .logo { width: 32px; height: 32px; background: var(--blue); border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+  .logo svg { width: 18px; height: 18px; stroke: #fff; fill: none; stroke-width: 2; }
+  header h1 { font-size: 16px; font-weight: 600; }
+  header p { font-size: 12px; color: var(--gray-500); }
+  main { max-width: 520px; margin: 0 auto; padding: 20px 16px 40px; }
+  .card { background: #fff; border: 1px solid var(--gray-100); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
+  .card-title { font-size: 13px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 14px; }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field.full { grid-column: span 2; }
+  .field label { font-size: 12px; color: var(--gray-500); font-weight: 500; }
+  .field input, .field select {
+    font-size: 15px; padding: 10px 12px;
+    border: 1px solid var(--gray-300); border-radius: var(--radius-sm);
+    background: #fff; color: var(--gray-900); width: 100%;
+    -webkit-appearance: none; appearance: none;
+  }
+  .field input:focus, .field select:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-light); }
+  .upload-zone {
+    border: 2px dashed var(--gray-300); border-radius: var(--radius);
+    padding: 32px 20px; text-align: center; cursor: pointer;
+    background: var(--gray-50); transition: all 0.15s;
+  }
+  .upload-zone:hover, .upload-zone.active { border-color: var(--blue); background: var(--blue-light); }
+  .upload-zone .icon { width: 48px; height: 48px; background: var(--gray-100); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; }
+  .upload-zone .icon svg { width: 22px; height: 22px; stroke: var(--gray-500); fill: none; stroke-width: 2; }
+  .upload-zone h3 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .upload-zone p { font-size: 13px; color: var(--gray-500); }
+  #file-input { display: none; }
+  .preview-wrap { position: relative; }
+  .preview-wrap img { width: 100%; border-radius: var(--radius-sm); border: 1px solid var(--gray-100); display: block; max-height: 260px; object-fit: cover; }
+  .preview-wrap .retake { position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,0.55); color: #fff; border: none; border-radius: 6px; font-size: 12px; padding: 5px 10px; cursor: pointer; }
+  .ai-status { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 14px; }
+  .ai-status.loading { background: var(--blue-light); color: var(--blue-dark); }
+  .ai-status.success { background: var(--green-light); color: var(--green); }
+  .ai-status.error { background: var(--red-light); color: var(--red); }
+  .ai-status.warn { background: var(--amber-light); color: var(--amber); }
+  .spinner { width: 16px; height: 16px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .reading-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--gray-100); }
+  .reading-row:last-child { border-bottom: none; }
+  .reading-label { font-size: 13px; color: var(--gray-500); }
+  .reading-value-wrap { display: flex; align-items: center; gap: 6px; }
+  .reading-value { font-size: 18px; font-weight: 600; min-width: 60px; text-align: right; border: 1px solid transparent; border-radius: 6px; padding: 2px 6px; }
+  .reading-value:focus { outline: none; border-color: var(--blue); background: var(--blue-light); }
+  .reading-unit { font-size: 13px; color: var(--gray-500); min-width: 28px; }
+  .conf-bar { height: 3px; border-radius: 2px; background: var(--gray-100); margin-top: 3px; }
+  .conf-fill { height: 100%; border-radius: 2px; }
+  .badge { display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 20px; }
+  .badge.ok { background: var(--green-light); color: var(--green); }
+  .badge.warn { background: var(--amber-light); color: var(--amber); }
+  .badge.crit { background: var(--red-light); color: var(--red); }
+  .badge.info { background: var(--blue-light); color: var(--blue-dark); }
+  .btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 14px; border-radius: var(--radius-sm); font-size: 15px; font-weight: 600; cursor: pointer; border: none; transition: all 0.15s; }
+  .btn:active { transform: scale(0.98); }
+  .btn-primary { background: var(--blue); color: #fff; }
+  .btn-primary:hover { background: var(--blue-dark); }
+  .btn-primary:disabled { background: var(--gray-300); cursor: not-allowed; transform: none; }
+  .btn-outline { background: #fff; color: var(--gray-700); border: 1px solid var(--gray-300); }
+  .btn-outline:hover { background: var(--gray-50); }
+  .btn-green { background: var(--green); color: #fff; }
+  .btn-green:hover { background: #085041; }
+  .success-screen { text-align: center; padding: 32px 20px; }
+  .success-screen .check { width: 64px; height: 64px; background: var(--green-light); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; }
+  .success-screen .check svg { width: 30px; height: 30px; stroke: var(--green); fill: none; stroke-width: 2.5; }
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--gray-900); color: #fff; padding: 12px 20px; border-radius: var(--radius-sm); font-size: 14px; z-index: 999; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+  </div>
+  <div>
+    <h1>Boiler Operations Log</h1>
+    <p>Tyre Pyrolysis Plant</p>
+  </div>
+</header>
+
+<main>
+  <!-- ENTRY FORM -->
+  <div id="form-screen">
+    <div class="card">
+      <div class="card-title">Your details</div>
+      <div class="form-grid">
+        <div class="field">
+          <label>Operator name</label>
+          <input type="text" id="f-operator" placeholder="Your name" autocomplete="name" />
+        </div>
+        <div class="field">
+          <label>Boiler unit</label>
+          <select id="f-unit">
+            <option value="Boiler 1">Boiler 1</option>
+            <option value="Boiler 2">Boiler 2</option>
+            <option value="Boiler 3">Boiler 3</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Date</label>
+          <input type="date" id="f-date" />
+        </div>
+        <div class="field">
+          <label>Time</label>
+          <input type="time" id="f-time" />
+        </div>
+        <div class="field full">
+          <label>Shift</label>
+          <select id="f-shift">
+            <option value="Morning (6am–2pm)">Morning (6am–2pm)</option>
+            <option value="Afternoon (2pm–10pm)">Afternoon (2pm–10pm)</option>
+            <option value="Night (10pm–6am)">Night (10pm–6am)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Gauge photo</div>
+      <div class="upload-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+        <div class="icon">
+          <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        </div>
+        <h3>Take or upload a photo</h3>
+        <p>Point camera at the gauge — AI will read it automatically</p>
+      </div>
+      <input type="file" id="file-input" accept="image/*" capture="environment" onchange="onFileSelect(event)" />
+    </div>
+
+    <!-- AI RESULT (hidden until photo uploaded) -->
+    <div class="card hidden" id="result-card">
+      <div class="card-title">AI reading result</div>
+      <div id="ai-status-wrap"></div>
+      <div class="preview-wrap" style="margin-bottom:14px;">
+        <img id="preview-img" src="" alt="Gauge photo" />
+        <button class="retake" onclick="resetPhoto()">Retake</button>
+      </div>
+      <div id="readings-list"></div>
+      <div style="margin-top:4px;padding-top:12px;border-top:1px solid var(--gray-100);">
+        <p style="font-size:12px;color:var(--gray-500);" id="ai-notes"></p>
+      </div>
+    </div>
+
+    <button class="btn btn-primary" id="submit-btn" onclick="submitEntry()" disabled>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+      Confirm &amp; submit reading
+    </button>
+  </div>
+
+  <!-- SUCCESS SCREEN -->
+  <div id="success-screen" class="card success-screen hidden">
+    <div class="check">
+      <svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+    </div>
+    <h2 style="font-size:20px;font-weight:700;margin-bottom:6px;">Reading logged!</h2>
+    <p style="font-size:14px;color:var(--gray-500);margin-bottom:24px;">Your gauge data has been saved to the cloud.</p>
+    <button class="btn btn-primary" onclick="resetAll()">Log another reading</button>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ─── CONFIG — replace these with your actual values ───────────────────────────
+const SUPABASE_URL  = 'YOUR_SUPABASE_URL';
+const SUPABASE_ANON = 'YOUR_SUPABASE_ANON_KEY';
+const ANTHROPIC_PROXY = '/api/read-gauge'; // Vercel serverless function
+// ──────────────────────────────────────────────────────────────────────────────
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+let pendingResult = null;
+let imageBase64   = null;
+let imageType     = null;
+
+const TEMP_WARN=500, TEMP_CRIT=650, PRES_WARN=6, PRES_CRIT=9;
+function status(t,p){ if(t>=TEMP_CRIT||p>=PRES_CRIT) return 'critical'; if(t>=TEMP_WARN||p>=PRES_WARN) return 'warning'; return 'normal'; }
+
+// defaults
+(function(){
+  const n=new Date();
+  document.getElementById('f-date').value=n.toISOString().split('T')[0];
+  document.getElementById('f-time').value=n.toTimeString().slice(0,5);
+  const h=n.getHours();
+  document.getElementById('f-shift').value=h<14?'Morning (6am–2pm)':h<22?'Afternoon (2pm–10pm)':'Night (10pm–6am)';
+})();
+
+function toast(msg, dur=2800){
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'),dur);
+}
+
+function onFileSelect(e){ if(e.target.files[0]) readFile(e.target.files[0]); }
+
+function readFile(file){
+  if(!file.type.startsWith('image/')){ toast('Please select an image file.'); return; }
+  const reader=new FileReader();
+  reader.onload=e=>{ imageBase64=e.target.result.split(',')[1]; imageType=file.type; startAnalysis(e.target.result); };
+  reader.readAsDataURL(file);
+}
+
+function startAnalysis(dataUrl){
+  document.getElementById('preview-img').src=dataUrl;
+  document.getElementById('result-card').classList.remove('hidden');
+  document.getElementById('submit-btn').disabled=true;
+  document.getElementById('ai-status-wrap').innerHTML=`<div class="ai-status loading"><div class="spinner"></div><span>AI is reading the gauge...</span></div>`;
+  document.getElementById('readings-list').innerHTML='';
+  document.getElementById('ai-notes').textContent='';
+  pendingResult=null;
+  callGaugeReader();
+}
+
+async function callGaugeReader(){
+  try{
+    const res=await fetch(ANTHROPIC_PROXY,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({base64:imageBase64, mediaType:imageType})
+    });
+    if(!res.ok) throw new Error('API error');
+    const parsed=await res.json();
+    showResult(parsed);
+  } catch(err){
+    document.getElementById('ai-status-wrap').innerHTML=`<div class="ai-status error"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span>Could not read gauge. Try a clearer photo.</span></div>`;
+  }
+}
+
+function showResult(parsed){
+  pendingResult=parsed;
+  const gauges=parsed.gauges||[];
+  const conf=parsed.overall_confidence||0;
+  const iq=parsed.image_quality||'unknown';
+
+  const statusClass=conf>=80?'success':conf>=50?'warn':'error';
+  const statusMsg=conf>=80?`High confidence read (${conf}%)`:conf>=50?`Medium confidence (${conf}%) — please verify values`:`Low confidence (${conf}%) — manually check values`;
+  document.getElementById('ai-status-wrap').innerHTML=`<div class="ai-status ${statusClass}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><span>${statusMsg}</span></div>`;
+
+  let html='';
+  gauges.forEach(g=>{
+    const c=g.confidence||0;
+    const fillColor=c>=80?'var(--green)':c>=50?'var(--amber)':'var(--red)';
+    html+=`<div class="reading-row">
+      <div>
+        <div class="reading-label">${g.label||g.type}</div>
+        <div class="conf-bar"><div class="conf-fill" style="width:${c}%;background:${fillColor}"></div></div>
+        <div style="font-size:11px;color:var(--gray-500);margin-top:2px;">${c}% confidence</div>
+      </div>
+      <div class="reading-value-wrap">
+        <span class="reading-value" contenteditable="true" id="val-${g.type}">${g.value}</span>
+        <span class="reading-unit">${g.unit}</span>
+        ${g.in_danger_zone?'<span class="badge crit">!</span>':''}
+      </div>
+    </div>`;
+  });
+
+  if(!gauges.length) html=`<p style="font-size:13px;color:var(--gray-500);padding:12px 0;">No gauges detected. Try a closer, clearer photo.</p>`;
+  document.getElementById('readings-list').innerHTML=html;
+
+  if(parsed.notes) document.getElementById('ai-notes').textContent=`Note: ${parsed.notes} — Image quality: ${iq}`;
+  if(gauges.length) document.getElementById('submit-btn').disabled=false;
+}
+
+function resetPhoto(){
+  document.getElementById('result-card').classList.add('hidden');
+  document.getElementById('submit-btn').disabled=true;
+  document.getElementById('file-input').value='';
+  pendingResult=null; imageBase64=null; imageType=null;
+}
+
+async function submitEntry(){
+  if(!pendingResult) return;
+  const operator=document.getElementById('f-operator').value.trim();
+  if(!operator){ toast('Please enter your name.'); return; }
+
+  const gauges=pendingResult.gauges||[];
+  let tempVal=null, presVal=null;
+  const tEl=document.getElementById('val-temperature');
+  const pEl=document.getElementById('val-pressure');
+  if(tEl) tempVal=parseFloat(tEl.textContent)||null;
+  if(pEl){
+    presVal=parseFloat(pEl.textContent)||null;
+    const pG=gauges.find(g=>g.type==='pressure');
+    if(pG&&presVal){
+      if(pG.unit.toLowerCase().includes('psi')) presVal=+(presVal*0.0689476).toFixed(2);
+      if(pG.unit.toLowerCase().includes('kpa')) presVal=+(presVal*0.01).toFixed(2);
+    }
+  }
+
+  const allReadings={};
+  gauges.forEach(g=>{
+    const el=document.getElementById('val-'+g.type);
+    allReadings[g.type]={ value: el?parseFloat(el.textContent):g.value, unit: g.unit };
+  });
+
+  const entry={
+    operator,
+    boiler_unit: document.getElementById('f-unit').value,
+    shift: document.getElementById('f-shift').value,
+    reading_date: document.getElementById('f-date').value,
+    reading_time: document.getElementById('f-time').value,
+    temperature_c: tempVal,
+    pressure_bar: presVal,
+    all_readings: allReadings,
+    ai_confidence: pendingResult.overall_confidence||0,
+    image_quality: pendingResult.image_quality||'unknown',
+    notes: pendingResult.notes||'',
+    status: status(tempVal||0, presVal||0),
+    created_at: new Date().toISOString()
+  };
+
+  document.getElementById('submit-btn').disabled=true;
+  document.getElementById('submit-btn').textContent='Saving...';
+
+  const { error }=await sb.from('gauge_readings').insert([entry]);
+  if(error){ toast('Save failed: '+error.message); document.getElementById('submit-btn').disabled=false; document.getElementById('submit-btn').textContent='Confirm & submit reading'; return; }
+
+  document.getElementById('form-screen').classList.add('hidden');
+  document.getElementById('success-screen').classList.remove('hidden');
+}
+
+function resetAll(){
+  document.getElementById('form-screen').classList.remove('hidden');
+  document.getElementById('success-screen').classList.add('hidden');
+  resetPhoto();
+  document.getElementById('submit-btn').disabled=true;
+  document.getElementById('submit-btn').innerHTML=`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>Confirm & submit reading`;
+  const n=new Date();
+  document.getElementById('f-time').value=n.toTimeString().slice(0,5);
+}
+</script>
+</body>
+</html>
